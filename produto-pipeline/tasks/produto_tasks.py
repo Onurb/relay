@@ -3,6 +3,7 @@ import logging
 from crewai import Agent, Task
 
 from agents.product_thinker import PRDOutput, ProductThinkerAgent, ThinkerInput
+from agents.prompt_engineer import PromptEngineerAgent, PromptEngineerInput
 from agents.sprint_planner import PlannerInput, SprintPlannerAgent
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,11 @@ def build_sprint_planner_agent() -> Agent:
     return SprintPlannerAgent().build()
 
 
+def build_prompt_engineer_agent() -> Agent:
+    """Creates and returns the CrewAI Agent for the PromptEngineer role."""
+    return PromptEngineerAgent().build()
+
+
 class ProdutoTasks:
     """Defines all tasks for the product pipeline CrewAI Crew.
 
@@ -30,9 +36,11 @@ class ProdutoTasks:
         self,
         thinker_input: ThinkerInput | None = None,
         planner_input: PlannerInput | None = None,
+        engineer_input: PromptEngineerInput | None = None,
     ) -> None:
         self._thinker_input = thinker_input
         self._planner_input = planner_input
+        self._engineer_input = engineer_input
 
     def product_analysis_task(
         self,
@@ -124,13 +132,52 @@ class ProdutoTasks:
             context=context or [],
         )
 
-    def prompt_engineering_task(self) -> Task:
+    def prompt_engineering_task(
+        self,
+        agent: Agent | None = None,
+        engineer_input: PromptEngineerInput | None = None,
+        context: list[Task] | None = None,
+    ) -> Task:
         """CrewAI Task for the PromptEngineerAgent.
 
-        TODO: implement in week 2.
+        Converts each approved sprint task into a VibeCoderPrompt enriched
+        with RAG context, explicit constraints, and acceptance criteria.
         """
-        # TODO: implement in week 2 — PromptEngineerAgent
-        pass  # type: ignore[return-value]
+        effective_input = engineer_input or self._engineer_input
+        effective_agent = agent or build_prompt_engineer_agent()
+
+        description = (
+            "Convert each sprint task into a precise, context-rich prompt for the "
+            "Vibe Coder.\n\n"
+            "Instructions:\n"
+            "1. For each task in the sprint plan, search the codebase RAG index for "
+            "relevant files.\n"
+            "2. Write step-by-step implementation instructions referencing specific "
+            "existing code.\n"
+            "3. Add explicit constraints from product memory (naming patterns, "
+            "architectural decisions).\n"
+            "4. Include acceptance criteria from the original user story.\n"
+            "5. Predict which files will need to be created or modified.\n"
+        )
+
+        if effective_input:
+            description += (
+                f"\nSprint: {effective_input.sprint_plan.sprint_name}\n"
+                f"Tasks: {len(effective_input.sprint_plan.tasks)}\n"
+                f"Stack: {effective_input.stack}\n"
+            )
+
+        return Task(
+            description=description,
+            expected_output=(
+                "A PromptEngineerOutput containing one VibeCoderPrompt per sprint "
+                "task, each with at least 1 RAG context file, clear step-by-step "
+                "instructions, explicit constraints, and acceptance criteria."
+            ),
+            agent=effective_agent,
+            human_input=False,
+            context=context or [],
+        )
 
     def code_generation_task(self) -> Task:
         """CrewAI Task for the VibeCoderAgent.
