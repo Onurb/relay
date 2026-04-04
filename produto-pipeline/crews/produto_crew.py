@@ -11,7 +11,7 @@ from agents.prompt_engineer import PromptEngineerAgent
 from agents.vibe_coder import VibeCoderAgent
 from agents.qa_agent import QAAgent
 from context.memory import PipelineMemory
-from context.rag_index import RAGIndex
+from context.rag_index import CodebaseRAG
 from tasks.produto_tasks import ProdutoTasks
 
 logger = logging.getLogger(__name__)
@@ -19,17 +19,27 @@ logger = logging.getLogger(__name__)
 
 def build_crew(
     product_memory: Optional[PipelineMemory] = None,
-    rag_index: Optional[RAGIndex] = None,
+    rag_index: Optional[CodebaseRAG] = None,
 ) -> Crew:
     """Builds and returns a configured CrewAI Crew for the product pipeline.
 
+    Ensures the RAG index is refreshed before the PromptEngineer runs so
+    that context always reflects the latest codebase state.
+
     Args:
         product_memory: Optional shared memory instance to inject as context.
-        rag_index: Optional RAG index to inject as context.
+        rag_index: Optional CodebaseRAG instance to inject as context.
 
     Returns:
         A CrewAI Crew configured for sequential execution with memory enabled.
     """
+    # Refresh the RAG index before the PromptEngineer consumes it.
+    if rag_index is not None:
+        try:
+            rag_index.update()
+        except Exception as exc:
+            logger.warning("RAG index update failed — proceeding with stale index: %s", exc)
+
     tasks_factory = ProdutoTasks()
 
     agent_builders = [
@@ -51,14 +61,18 @@ def build_crew(
 
     agents = [a for a in built_agents if a is not None]
 
-    tasks = [
-        tasks_factory.product_analysis_task(),
-        tasks_factory.sprint_planning_task(),
-        tasks_factory.prompt_engineering_task(),
-        tasks_factory.code_generation_task(),
-        tasks_factory.qa_review_task(),
-    ]
-    tasks = [t for t in tasks if t is not None]
+    thinker_task = tasks_factory.product_analysis_task()
+    planner_task = tasks_factory.sprint_planning_task(
+        context=[thinker_task] if thinker_task else []
+    )
+    engineer_task = tasks_factory.prompt_engineering_task(
+        context=[planner_task] if planner_task else []
+    )
+    coder_task = tasks_factory.code_generation_task()
+    qa_task = tasks_factory.qa_review_task()
+
+    tasks = [t for t in [thinker_task, planner_task, engineer_task, coder_task, qa_task]
+             if t is not None]
 
     return Crew(
         agents=agents,
@@ -79,7 +93,7 @@ class ProdutoCrew:
     def __init__(
         self,
         product_memory: Optional[PipelineMemory] = None,
-        rag_index: Optional[RAGIndex] = None,
+        rag_index: Optional[CodebaseRAG] = None,
     ) -> None:
         self._product_memory = product_memory
         self._rag_index = rag_index
