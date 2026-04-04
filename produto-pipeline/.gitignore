@@ -1,0 +1,11 @@
+.env
+rag_index/
+memory/
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+htmlcov/
+dist/
+build/
+*.egg-info/
