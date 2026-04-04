@@ -3,6 +3,7 @@ import logging
 from crewai import Agent, Task
 
 from agents.product_thinker import PRDOutput, ProductThinkerAgent, ThinkerInput
+from agents.sprint_planner import PlannerInput, SprintPlannerAgent
 
 logger = logging.getLogger(__name__)
 
@@ -12,16 +13,26 @@ def build_product_thinker_agent() -> Agent:
     return ProductThinkerAgent().build()
 
 
+def build_sprint_planner_agent() -> Agent:
+    """Creates and returns the CrewAI Agent for the SprintPlanner role."""
+    return SprintPlannerAgent().build()
+
+
 class ProdutoTasks:
     """Defines all tasks for the product pipeline CrewAI Crew.
 
-    Each method returns a configured crewai.Task. The product_analysis_task
-    is fully implemented; the remaining tasks are placeholders to be
-    implemented in subsequent weeks.
+    Each method returns a configured crewai.Task. product_analysis_task and
+    sprint_planning_task are fully implemented; the remaining tasks are
+    placeholders to be implemented in subsequent weeks.
     """
 
-    def __init__(self, thinker_input: ThinkerInput | None = None) -> None:
+    def __init__(
+        self,
+        thinker_input: ThinkerInput | None = None,
+        planner_input: PlannerInput | None = None,
+    ) -> None:
         self._thinker_input = thinker_input
+        self._planner_input = planner_input
 
     def product_analysis_task(
         self,
@@ -68,13 +79,50 @@ class ProdutoTasks:
             human_input=True,
         )
 
-    def sprint_planning_task(self) -> Task:
+    def sprint_planning_task(
+        self,
+        agent: Agent | None = None,
+        planner_input: PlannerInput | None = None,
+        context: list[Task] | None = None,
+    ) -> Task:
         """CrewAI Task for the SprintPlannerAgent.
 
-        TODO: implement in week 2.
+        Receives the approved PRD from the ProductThinker and produces a
+        structured SprintPlan with Fibonacci-estimated tasks, topological
+        ordering, and Linear issue creation after human approval.
         """
-        # TODO: implement in week 2 — SprintPlannerAgent
-        pass  # type: ignore[return-value]
+        effective_input = planner_input or self._planner_input
+        effective_agent = agent or build_sprint_planner_agent()
+
+        description = (
+            "Break the approved PRD user stories into technical tasks and plan the sprint.\n\n"
+            "Instructions:\n"
+            "1. Break each user story into 1-5 concrete technical tasks.\n"
+            "2. Estimate each task in Fibonacci story points (1, 2, 3, 5, 8, 13).\n"
+            "3. Identify dependencies between tasks and order them correctly.\n"
+            "4. Suggest an assignee role per task (backend/frontend/devops/qa).\n"
+            "5. Check historical velocity to avoid over- or under-loading the sprint.\n"
+            "6. Never create tasks that duplicate open GitHub issues.\n"
+        )
+
+        if effective_input:
+            description += (
+                f"\nFeature: {effective_input.prd.feature_name}\n"
+                f"Repo: {effective_input.repo}\n"
+                f"User stories: {len(effective_input.prd.user_stories)}\n"
+            )
+
+        return Task(
+            description=description,
+            expected_output=(
+                "A structured sprint plan in JSON format matching SprintPlan schema, "
+                "with all tasks estimated in Fibonacci points, topologically ordered, "
+                "and created in Linear with valid issue IDs and URLs."
+            ),
+            agent=effective_agent,
+            human_input=True,
+            context=context or [],
+        )
 
     def prompt_engineering_task(self) -> Task:
         """CrewAI Task for the PromptEngineerAgent.
